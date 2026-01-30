@@ -45,23 +45,19 @@ async function checkScopesChanged(text) {
 async function runAuth0Command(args, options = {}) {
   log(`Running: auth0 ${args.join(" ")}`);
 
-  // Use reject: false to get output even on "failure" (like scope prompts)
-  // Add timeout to prevent hanging
   const result = await execa("auth0", args, {
     ...options,
     reject: false,
-    timeout: 30000, // 30 second timeout
+    timeout: 30000,
   });
 
   log(`exitCode: ${result.exitCode}`);
   log(`stdout: ${result.stdout?.substring(0, 500)}`);
   log(`stderr: ${result.stderr?.substring(0, 500)}`);
 
-  // Check for scopes issue in any output
   const allText = [result.stdout, result.stderr].filter(Boolean).join(" ");
   await checkScopesChanged(allText);
 
-  // If command failed, throw error
   if (result.exitCode !== 0) {
     const error = new Error(`Command failed: auth0 ${args.join(" ")}`);
     error.stdout = result.stdout;
@@ -90,18 +86,16 @@ async function runAuth0Api(method, path, data = null) {
   const result = await execa("auth0", args, {
     ...options,
     reject: false,
-    timeout: 30000, // 30 second timeout
+    timeout: 30000,
   });
 
   log(`exitCode: ${result.exitCode}`);
   log(`stdout: ${result.stdout?.substring(0, 500)}`);
   log(`stderr: ${result.stderr?.substring(0, 500)}`);
 
-  // Check for scopes issue in any output
   const allText = [result.stdout, result.stderr].filter(Boolean).join(" ");
   await checkScopesChanged(allText);
 
-  // If command failed, throw error
   if (result.exitCode !== 0) {
     const error = new Error(`Command failed: auth0 api ${method} ${path}`);
     error.stdout = result.stdout;
@@ -113,6 +107,7 @@ async function runAuth0Api(method, path, data = null) {
   return result;
 }
 
+// Constants
 const TOKEN_VAULT_GRANT_TYPE =
   "urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token";
 
@@ -140,10 +135,41 @@ const MY_ACCOUNT_API_SCOPES = [
   },
 ];
 
+const TOKEN_VAULT_FLAVORS = {
+  connected_accounts: {
+    label: "Connected Accounts",
+    hint: "User-managed linked accounts via My Account API",
+    description:
+      "Allows users to link multiple external accounts to their Auth0 profile and manage them via the My Account API.",
+  },
+  refresh_token_exchange: {
+    label: "Refresh Token Exchange",
+    hint: "Exchange Auth0 refresh tokens for external tokens",
+    description:
+      "Backend services exchange Auth0 refresh tokens to retrieve external provider tokens without user interaction.",
+  },
+  access_token_exchange: {
+    label: "Access Token Exchange",
+    hint: "Exchange Auth0 access tokens for external tokens",
+    description:
+      "Backend APIs exchange Auth0 access tokens to retrieve external provider tokens on behalf of users.",
+  },
+  privileged_worker: {
+    label: "Privileged Worker Token Exchange",
+    hint: "M2M apps exchange signed JWTs for external tokens",
+    description:
+      "Machine-to-machine applications use signed JWT bearer tokens to retrieve external provider tokens without active user sessions.",
+  },
+};
+
+// ============================================================================
+// Main Function
+// ============================================================================
+
 async function main() {
   console.clear();
 
-  p.intro(pc.bgCyan(pc.black(" Auth0 Token Vault Connected Accounts Setup ")));
+  p.intro(pc.bgCyan(pc.black(" Auth0 Token Vault Setup ")));
 
   // Check Auth0 CLI installation
   const cliInstalled = await checkAuth0CLI();
@@ -208,47 +234,58 @@ async function main() {
 
   p.log.info(`Using application: ${pc.cyan(app.name)} (${pc.dim(app.id)})`);
 
-  // Configure application for Token Vault
+  // Configure basic Token Vault settings (always required)
   await configureApplicationForTokenVault(app.id);
 
-  // Enable My Account API
-  await enableMyAccountAPI(tenantInfo.domain);
-
-  // Create client grant for My Account API
-  await createClientGrant(app.id, tenantInfo.domain);
-
-  // Configure MRRT
-  await configureMRRT(app.id, tenantInfo.domain);
-
-  // Configure connections
+  // Configure connections for Token Vault
   await configureConnections(app.id);
 
-  // Build dashboard URL
-  const domainParts = tenantInfo.domain.split(".");
-  let dashboardUrl;
-  if (domainParts.length === 4) {
-    // Format: tenant.region.auth0.com
-    const [tenant, region] = domainParts;
-    dashboardUrl = `https://manage.auth0.com/dashboard/${region}/${tenant}/applications/${app.id}/settings`;
-  } else {
-    // Format: tenant.auth0.com (US region)
-    const [tenant] = domainParts;
-    dashboardUrl = `https://manage.auth0.com/dashboard/us/${tenant}/applications/${app.id}/settings`;
+  // Ask which Token Vault flavor to configure
+  const flavor = await p.select({
+    message: "Which Token Vault configuration do you need?",
+    options: Object.entries(TOKEN_VAULT_FLAVORS).map(([value, config]) => ({
+      value,
+      label: config.label,
+      hint: config.hint,
+    })),
+  });
+
+  if (p.isCancel(flavor)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
   }
 
-  p.note(
-    `${pc.bold("Application Details:")}\n` +
-      `  Name:      ${pc.cyan(app.name)}\n` +
-      `  Client ID: ${pc.dim(app.id)}\n\n` +
-      `${pc.bold("Settings:")}\n` +
-      `  ${pc.cyan(dashboardUrl)}\n\n` +
-      `${pc.bold("Documentation:")}\n` +
-      `  ${pc.cyan("https://auth0.com/docs/secure/call-apis-on-users-behalf/token-vault")}`,
-    "Setup Complete",
-  );
+  // Set up Connected Accounts (foundation for all Token Vault flavors)
+  await setupConnectedAccounts(app.id, tenantInfo.domain);
+
+  // Apply flavor-specific configuration
+  switch (flavor) {
+    case "connected_accounts":
+      // Base Connected Accounts setup is complete
+      break;
+
+    case "refresh_token_exchange":
+      await setupRefreshTokenExchange(app.id, tenantInfo.domain);
+      break;
+
+    case "access_token_exchange":
+      await setupAccessTokenExchange(app.id, tenantInfo.domain);
+      break;
+
+    case "privileged_worker":
+      await setupPrivilegedWorker(app.id, tenantInfo.domain);
+      break;
+  }
+
+  // Show completion summary
+  showCompletionSummary(app, tenantInfo.domain, flavor);
 
   p.outro(pc.green("All done!"));
 }
+
+// ============================================================================
+// Auth0 CLI Helpers
+// ============================================================================
 
 async function checkAuth0CLI() {
   try {
@@ -268,7 +305,6 @@ async function checkAuth0Login() {
       "--no-input",
     ]);
     const tenants = JSON.parse(stdout || "[]");
-    // Check if we have any tenants (logged in)
     return tenants.length > 0;
   } catch {
     return false;
@@ -302,6 +338,10 @@ async function getTenantInfo() {
   const activeTenant = tenants.find((t) => t.active) || tenants[0];
   return { domain: activeTenant.name };
 }
+
+// ============================================================================
+// Application Management
+// ============================================================================
 
 async function createNewApplication() {
   const details = await p.group(
@@ -411,6 +451,10 @@ async function selectExistingApplication() {
   }
 }
 
+// ============================================================================
+// Basic Token Vault Configuration (always applied)
+// ============================================================================
+
 async function configureApplicationForTokenVault(appId) {
   const s = p.spinner();
   s.start("Configuring application for Token Vault...");
@@ -442,6 +486,7 @@ async function configureApplicationForTokenVault(appId) {
       grant_types: grantTypes,
     };
 
+    // Ensure confidential client (required for Token Vault)
     if (app.token_endpoint_auth_method === "none") {
       updatePayload.token_endpoint_auth_method = "client_secret_post";
     }
@@ -453,276 +498,6 @@ async function configureApplicationForTokenVault(appId) {
     s.stop("Failed to configure application");
     p.log.error(error.message);
     throw error;
-  }
-}
-
-async function enableMyAccountAPI(domain) {
-  const s = p.spinner();
-  s.start("Enabling My Account API...");
-
-  const myAccountIdentifier = `https://${domain}/me/`;
-
-  try {
-    // First check if My Account API already exists
-    const { stdout } = await runAuth0Api(
-      "get",
-      `resource-servers?identifier=${encodeURIComponent(myAccountIdentifier)}`,
-    );
-    const apis = JSON.parse(stdout);
-
-    if (apis && apis.length > 0) {
-      // API exists, check if we need to update scopes and access policy
-      const existingApi = apis[0];
-      const existingScopes = existingApi.scopes || [];
-      const existingScopeValues = existingScopes.map((scope) => scope.value);
-
-      // Check if connected accounts scopes are missing
-      const missingScopes = MY_ACCOUNT_API_SCOPES.filter(
-        (scope) => !existingScopeValues.includes(scope.value),
-      );
-
-      // Build update payload
-      const updatePayload = {};
-
-      if (missingScopes.length > 0) {
-        log(`Adding missing scopes: ${missingScopes.map((sc) => sc.value).join(", ")}`);
-        updatePayload.scopes = [...existingScopes, ...missingScopes];
-      }
-
-      // Configure access policy to allow user access via client grants
-      // This ensures applications with a client grant can access the API
-      const currentUserPolicy =
-        existingApi.subject_type_authorization?.user?.policy;
-      if (currentUserPolicy !== "require_client_grant") {
-        log(`Setting user access policy to require_client_grant (current: ${currentUserPolicy})`);
-        updatePayload.subject_type_authorization = {
-          user: {
-            policy: "require_client_grant",
-          },
-        };
-      }
-
-      if (Object.keys(updatePayload).length > 0) {
-        await runAuth0Api(
-          "patch",
-          `resource-servers/${existingApi.id}`,
-          updatePayload,
-        );
-        s.stop("My Account API configured with access policy and scopes");
-      } else {
-        s.stop("My Account API is already enabled");
-      }
-
-      return { identifier: myAccountIdentifier, id: existingApi.id };
-    }
-
-    // API doesn't exist, try to create it
-    log("My Account API not found, attempting to create it");
-    try {
-      const { stdout: createOutput } = await runAuth0Api(
-        "post",
-        "resource-servers",
-        {
-          identifier: myAccountIdentifier,
-          name: "My Account",
-          scopes: MY_ACCOUNT_API_SCOPES,
-          signing_alg: "RS256",
-          allow_offline_access: true,
-          token_lifetime: 86400,
-          token_lifetime_for_web: 7200,
-          skip_consent_for_verifiable_first_party_clients: true,
-          subject_type_authorization: {
-            user: {
-              policy: "require_client_grant",
-            },
-          },
-        },
-      );
-      const createdApi = JSON.parse(createOutput);
-      s.stop("My Account API created and enabled");
-      return { identifier: myAccountIdentifier, id: createdApi.id };
-    } catch (createError) {
-      // If creation fails, it might be a system API that needs special activation
-      log(`Creation failed: ${createError.message}`);
-      if (createError.stdout) log(`stdout: ${createError.stdout}`);
-      if (createError.stderr) log(`stderr: ${createError.stderr}`);
-
-      // Build dashboard URL for manual activation
-      const domainParts = domain.split(".");
-      let dashboardUrl;
-      if (domainParts.length === 4) {
-        const [tenant, region] = domainParts;
-        dashboardUrl = `https://manage.auth0.com/dashboard/${region}/${tenant}/apis`;
-      } else {
-        const [tenant] = domainParts;
-        dashboardUrl = `https://manage.auth0.com/dashboard/us/${tenant}/apis`;
-      }
-
-      s.stop("My Account API needs manual activation");
-      p.note(
-        `The My Account API requires manual activation:\n\n` +
-          `1. Go to the Auth0 Dashboard:\n` +
-          `   ${pc.cyan(dashboardUrl)}\n\n` +
-          `2. Look for the ${pc.bold("My Account API")} banner\n\n` +
-          `3. Click ${pc.bold("Activate")}\n\n` +
-          `Once activated, run this script again to complete the setup.`,
-        "Action Required",
-      );
-      return { identifier: myAccountIdentifier, id: null };
-    }
-  } catch (error) {
-    s.stop("Could not verify My Account API status");
-    log(`My Account API error: ${error.message}`);
-    if (error.stdout) log(`stdout: ${error.stdout}`);
-    if (error.stderr) log(`stderr: ${error.stderr}`);
-
-    p.log.warning(
-      "Please ensure My Account API is enabled in your Auth0 Dashboard.",
-    );
-    return { identifier: myAccountIdentifier, id: null };
-  }
-}
-
-async function createClientGrant(appId, domain) {
-  const s = p.spinner();
-  s.start("Creating client grant for My Account API...");
-  const myAccountIdentifier = `https://${domain}/me/`;
-
-  try {
-    // Check for existing client grants (both user and client types)
-    const { stdout: grantsOutput } = await runAuth0Api(
-      "get",
-      `client-grants?client_id=${appId}&audience=${encodeURIComponent(myAccountIdentifier)}`,
-    );
-
-    const grants = JSON.parse(grantsOutput);
-
-    // Look for a user-type grant specifically
-    const userGrant = grants.find((g) => g.subject_type === "user");
-
-    if (userGrant) {
-      // Update existing user grant with scopes
-      const existingScopes = userGrant.scope || [];
-      const newScopes = [
-        ...new Set([...existingScopes, ...CONNECTED_ACCOUNTS_SCOPES]),
-      ];
-
-      await runAuth0Api("patch", `client-grants/${userGrant.id}`, {
-        scope: newScopes,
-      });
-
-      s.stop("Client grant updated with Connected Accounts scopes");
-      return;
-    }
-  } catch {
-    // Grant doesn't exist, create it
-  }
-
-  try {
-    // Create a new client grant with subject_type: "user" for user-based access
-    await runAuth0Api("post", "client-grants", {
-      client_id: appId,
-      audience: myAccountIdentifier,
-      scope: CONNECTED_ACCOUNTS_SCOPES,
-      subject_type: "user",
-    });
-
-    s.stop("Client grant created for My Account API (user access)");
-  } catch (error) {
-    if (error.message?.includes("already exists")) {
-      s.stop("Client grant already exists");
-    } else {
-      s.stop("Could not create client grant automatically");
-      log(`Client grant error: ${error.message}`);
-      if (error.stdout) log(`stdout: ${error.stdout}`);
-      if (error.stderr) log(`stderr: ${error.stderr}`);
-
-      p.note(
-        `Create a client grant in the Auth0 Dashboard:\n\n` +
-          `1. Go to Applications → APIs → My Account\n` +
-          `2. Click the "Machine to Machine Applications" tab\n` +
-          `3. Find your application and authorize it\n` +
-          `4. Select the Connected Accounts scopes:\n` +
-          `   - create:me:connected_accounts\n` +
-          `   - read:me:connected_accounts\n` +
-          `   - delete:me:connected_accounts`,
-        "Action Required",
-      );
-    }
-  }
-}
-
-async function configureMRRT(appId, domain) {
-  const s = p.spinner();
-  s.start("Configuring Multi-Resource Refresh Token (MRRT)...");
-  const myAccountIdentifier = `https://${domain}/me/`;
-
-  try {
-    // Get current app configuration
-    const { stdout } = await runAuth0Command([
-      "apps",
-      "show",
-      appId,
-      "--json",
-      "--no-input",
-    ]);
-    const app = JSON.parse(stdout);
-
-    // Get existing refresh_token config and policies
-    const refreshTokenConfig = app.refresh_token || {};
-    const existingPolicies = refreshTokenConfig.policies || [];
-
-    // Check if My Account API is already in MRRT policies
-    const hasMyAccountInMRRT = existingPolicies.some(
-      (policy) => policy.audience === myAccountIdentifier,
-    );
-
-    if (!hasMyAccountInMRRT) {
-      // Add My Account API to policies
-      const newPolicies = [
-        ...existingPolicies,
-        {
-          audience: myAccountIdentifier,
-          scope: CONNECTED_ACCOUNTS_SCOPES,
-        },
-      ];
-
-      await runAuth0Api("patch", `clients/${appId}`, {
-        refresh_token: {
-          ...refreshTokenConfig,
-          policies: newPolicies,
-        },
-      });
-
-      s.stop("MRRT configured with My Account API");
-    } else {
-      s.stop("MRRT already includes My Account API");
-    }
-  } catch (error) {
-    s.stop("Could not configure MRRT automatically");
-    log(`MRRT error: ${error.message}`);
-    if (error.stdout) log(`stdout: ${error.stdout}`);
-    if (error.stderr) log(`stderr: ${error.stderr}`);
-
-    // Build dashboard URL as fallback
-    const domainParts = domain.split(".");
-    let settingsUrl;
-    if (domainParts.length === 4) {
-      const [tenant, region] = domainParts;
-      settingsUrl = `https://manage.auth0.com/dashboard/${region}/${tenant}/applications/${appId}/settings`;
-    } else {
-      const [tenant] = domainParts;
-      settingsUrl = `https://manage.auth0.com/dashboard/us/${tenant}/applications/${appId}/settings`;
-    }
-
-    p.note(
-      `Configure MRRT manually in the Auth0 Dashboard:\n\n` +
-        `1. Go to your application settings:\n` +
-        `   ${pc.cyan(settingsUrl)}\n\n` +
-        `2. Scroll to ${pc.bold("Multi-Resource Refresh Token")}\n\n` +
-        `3. Click ${pc.bold("Edit Configuration")} and enable the My Account API`,
-      "Action Required: Configure MRRT",
-    );
   }
 }
 
@@ -771,7 +546,7 @@ async function configureConnections(appId) {
     }
 
     const selectedConnections = await p.multiselect({
-      message: "Select connections to enable for Connected Accounts:",
+      message: "Select connections to enable for Token Vault:",
       options: eligibleConnections.map((conn) => ({
         value: conn,
         label: conn.name,
@@ -795,6 +570,7 @@ async function configureConnections(appId) {
       connSpinner.start(`Configuring ${conn.name}...`);
 
       try {
+        // Enable Connected Accounts for the connection
         await runAuth0Api("patch", `connections/${conn.id}`, {
           options: {
             ...conn.options,
@@ -802,15 +578,14 @@ async function configureConnections(appId) {
           },
         });
 
+        // Enable the connection for this application
         await runAuth0Api("patch", `connections/${conn.id}`, {
           enabled_clients: [
             ...new Set([...(conn.enabled_clients || []), appId]),
           ],
         });
 
-        connSpinner.stop(
-          `${pc.cyan(conn.name)} configured for Connected Accounts`,
-        );
+        connSpinner.stop(`${pc.cyan(conn.name)} configured for Token Vault`);
       } catch {
         connSpinner.stop(`Could not fully configure ${conn.name}`);
         p.log.warning(
@@ -823,6 +598,577 @@ async function configureConnections(appId) {
     p.log.warning("Please configure connections manually in the Dashboard.");
   }
 }
+
+// ============================================================================
+// Connected Accounts Setup
+// ============================================================================
+
+async function setupConnectedAccounts(appId, domain) {
+  p.log.step("Setting up Connected Accounts...");
+
+  // Enable My Account API
+  await enableMyAccountAPI(domain);
+
+  // Create client grant for My Account API
+  await createClientGrant(appId, domain);
+
+  // Configure MRRT
+  await configureMRRT(appId, domain);
+}
+
+async function enableMyAccountAPI(domain) {
+  const s = p.spinner();
+  s.start("Enabling My Account API...");
+
+  const myAccountIdentifier = `https://${domain}/me/`;
+
+  try {
+    const { stdout } = await runAuth0Api(
+      "get",
+      `resource-servers?identifier=${encodeURIComponent(myAccountIdentifier)}`,
+    );
+    const apis = JSON.parse(stdout);
+
+    if (apis && apis.length > 0) {
+      const existingApi = apis[0];
+      const existingScopes = existingApi.scopes || [];
+      const existingScopeValues = existingScopes.map((scope) => scope.value);
+
+      const missingScopes = MY_ACCOUNT_API_SCOPES.filter(
+        (scope) => !existingScopeValues.includes(scope.value),
+      );
+
+      const updatePayload = {};
+
+      if (missingScopes.length > 0) {
+        log(
+          `Adding missing scopes: ${missingScopes.map((sc) => sc.value).join(", ")}`,
+        );
+        updatePayload.scopes = [...existingScopes, ...missingScopes];
+      }
+
+      const currentUserPolicy =
+        existingApi.subject_type_authorization?.user?.policy;
+      if (currentUserPolicy !== "require_client_grant") {
+        log(
+          `Setting user access policy to require_client_grant (current: ${currentUserPolicy})`,
+        );
+        updatePayload.subject_type_authorization = {
+          user: {
+            policy: "require_client_grant",
+          },
+        };
+      }
+
+      if (Object.keys(updatePayload).length > 0) {
+        await runAuth0Api(
+          "patch",
+          `resource-servers/${existingApi.id}`,
+          updatePayload,
+        );
+        s.stop("My Account API configured with access policy and scopes");
+      } else {
+        s.stop("My Account API is already enabled");
+      }
+
+      return { identifier: myAccountIdentifier, id: existingApi.id };
+    }
+
+    // API doesn't exist, try to create it
+    log("My Account API not found, attempting to create it");
+    try {
+      const { stdout: createOutput } = await runAuth0Api(
+        "post",
+        "resource-servers",
+        {
+          identifier: myAccountIdentifier,
+          name: "My Account",
+          scopes: MY_ACCOUNT_API_SCOPES,
+          signing_alg: "RS256",
+          allow_offline_access: true,
+          token_lifetime: 86400,
+          token_lifetime_for_web: 7200,
+          skip_consent_for_verifiable_first_party_clients: true,
+          subject_type_authorization: {
+            user: {
+              policy: "require_client_grant",
+            },
+          },
+        },
+      );
+      const createdApi = JSON.parse(createOutput);
+      s.stop("My Account API created and enabled");
+      return { identifier: myAccountIdentifier, id: createdApi.id };
+    } catch (createError) {
+      log(`Creation failed: ${createError.message}`);
+      if (createError.stdout) log(`stdout: ${createError.stdout}`);
+      if (createError.stderr) log(`stderr: ${createError.stderr}`);
+
+      const dashboardUrl = buildDashboardUrl(domain, "apis");
+
+      s.stop("My Account API needs manual activation");
+      p.note(
+        `The My Account API requires manual activation:\n\n` +
+          `1. Go to the Auth0 Dashboard:\n` +
+          `   ${pc.cyan(dashboardUrl)}\n\n` +
+          `2. Look for the ${pc.bold("My Account API")} banner\n\n` +
+          `3. Click ${pc.bold("Activate")}\n\n` +
+          `Once activated, run this script again to complete the setup.`,
+        "Action Required",
+      );
+      return { identifier: myAccountIdentifier, id: null };
+    }
+  } catch (error) {
+    s.stop("Could not verify My Account API status");
+    log(`My Account API error: ${error.message}`);
+    if (error.stdout) log(`stdout: ${error.stdout}`);
+    if (error.stderr) log(`stderr: ${error.stderr}`);
+
+    p.log.warning(
+      "Please ensure My Account API is enabled in your Auth0 Dashboard.",
+    );
+    return { identifier: myAccountIdentifier, id: null };
+  }
+}
+
+async function createClientGrant(appId, domain) {
+  const s = p.spinner();
+  s.start("Creating client grant for My Account API...");
+  const myAccountIdentifier = `https://${domain}/me/`;
+
+  try {
+    const { stdout: grantsOutput } = await runAuth0Api(
+      "get",
+      `client-grants?client_id=${appId}&audience=${encodeURIComponent(myAccountIdentifier)}`,
+    );
+
+    const grants = JSON.parse(grantsOutput);
+    const userGrant = grants.find((g) => g.subject_type === "user");
+
+    if (userGrant) {
+      const existingScopes = userGrant.scope || [];
+      const newScopes = [
+        ...new Set([...existingScopes, ...CONNECTED_ACCOUNTS_SCOPES]),
+      ];
+
+      await runAuth0Api("patch", `client-grants/${userGrant.id}`, {
+        scope: newScopes,
+      });
+
+      s.stop("Client grant updated with Connected Accounts scopes");
+      return;
+    }
+  } catch {
+    // Grant doesn't exist, create it
+  }
+
+  try {
+    await runAuth0Api("post", "client-grants", {
+      client_id: appId,
+      audience: myAccountIdentifier,
+      scope: CONNECTED_ACCOUNTS_SCOPES,
+      subject_type: "user",
+    });
+
+    s.stop("Client grant created for My Account API (user access)");
+  } catch (error) {
+    if (error.message?.includes("already exists")) {
+      s.stop("Client grant already exists");
+    } else {
+      s.stop("Could not create client grant automatically");
+      log(`Client grant error: ${error.message}`);
+      if (error.stdout) log(`stdout: ${error.stdout}`);
+      if (error.stderr) log(`stderr: ${error.stderr}`);
+
+      p.note(
+        `Create a client grant in the Auth0 Dashboard:\n\n` +
+          `1. Go to Applications -> APIs -> My Account\n` +
+          `2. Click the "Machine to Machine Applications" tab\n` +
+          `3. Find your application and authorize it\n` +
+          `4. Select the Connected Accounts scopes:\n` +
+          `   - create:me:connected_accounts\n` +
+          `   - read:me:connected_accounts\n` +
+          `   - delete:me:connected_accounts`,
+        "Action Required",
+      );
+    }
+  }
+}
+
+async function configureMRRT(appId, domain) {
+  const s = p.spinner();
+  s.start("Configuring Multi-Resource Refresh Token (MRRT)...");
+  const myAccountIdentifier = `https://${domain}/me/`;
+
+  try {
+    const { stdout } = await runAuth0Command([
+      "apps",
+      "show",
+      appId,
+      "--json",
+      "--no-input",
+    ]);
+    const app = JSON.parse(stdout);
+
+    const refreshTokenConfig = app.refresh_token || {};
+    const existingPolicies = refreshTokenConfig.policies || [];
+
+    const hasMyAccountInMRRT = existingPolicies.some(
+      (policy) => policy.audience === myAccountIdentifier,
+    );
+
+    if (!hasMyAccountInMRRT) {
+      const newPolicies = [
+        ...existingPolicies,
+        {
+          audience: myAccountIdentifier,
+          scope: CONNECTED_ACCOUNTS_SCOPES,
+        },
+      ];
+
+      await runAuth0Api("patch", `clients/${appId}`, {
+        refresh_token: {
+          ...refreshTokenConfig,
+          policies: newPolicies,
+        },
+      });
+
+      s.stop("MRRT configured with My Account API");
+    } else {
+      s.stop("MRRT already includes My Account API");
+    }
+  } catch (error) {
+    s.stop("Could not configure MRRT automatically");
+    log(`MRRT error: ${error.message}`);
+    if (error.stdout) log(`stdout: ${error.stdout}`);
+    if (error.stderr) log(`stderr: ${error.stderr}`);
+
+    const settingsUrl = buildDashboardUrl(
+      domain,
+      `applications/${appId}/settings`,
+    );
+
+    p.note(
+      `Configure MRRT manually in the Auth0 Dashboard:\n\n` +
+        `1. Go to your application settings:\n` +
+        `   ${pc.cyan(settingsUrl)}\n\n` +
+        `2. Scroll to ${pc.bold("Multi-Resource Refresh Token")}\n\n` +
+        `3. Click ${pc.bold("Edit Configuration")} and enable the My Account API`,
+      "Action Required: Configure MRRT",
+    );
+  }
+}
+
+// ============================================================================
+// Refresh Token Exchange Setup
+// ============================================================================
+
+async function setupRefreshTokenExchange(appId, domain) {
+  // Show usage instructions
+  p.note(
+    `${pc.bold("Refresh Token Exchange Usage:")}\n\n` +
+      `To exchange an Auth0 refresh token for an external provider token:\n\n` +
+      `POST ${pc.cyan(`https://${domain}/oauth/token`)}\n\n` +
+      `${pc.bold("Parameters:")}\n` +
+      `  grant_type: ${pc.dim(TOKEN_VAULT_GRANT_TYPE)}\n` +
+      `  subject_token: ${pc.dim("<auth0_refresh_token>")}\n` +
+      `  subject_token_type: ${pc.dim("urn:ietf:params:oauth:token-type:refresh_token")}\n` +
+      `  requested_token_type: ${pc.dim("http://auth0.com/oauth/token-type/federated-connection-access-token")}\n` +
+      `  connection: ${pc.dim("<connection_name>")}\n` +
+      `  client_id: ${pc.dim("<your_client_id>")}\n` +
+      `  client_secret: ${pc.dim("<your_client_secret>")}`,
+    "Token Exchange Endpoint",
+  );
+}
+
+// ============================================================================
+// Access Token Exchange Setup
+// ============================================================================
+
+async function setupAccessTokenExchange(appId, domain) {
+  // Ask if user wants to create a Custom API Client
+  const createCustomApiClient = await p.confirm({
+    message:
+      "Do you want to create a Custom API Client for your backend API? (Required for Access Token Exchange)",
+    initialValue: true,
+  });
+
+  if (p.isCancel(createCustomApiClient)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
+
+  if (createCustomApiClient) {
+    await createCustomAPIClient(domain);
+  }
+
+  // Show usage instructions
+  p.note(
+    `${pc.bold("Access Token Exchange Usage:")}\n\n` +
+      `Your backend API exchanges Auth0 access tokens for external provider tokens:\n\n` +
+      `POST ${pc.cyan(`https://${domain}/oauth/token`)}\n\n` +
+      `${pc.bold("Parameters:")}\n` +
+      `  grant_type: ${pc.dim(TOKEN_VAULT_GRANT_TYPE)}\n` +
+      `  subject_token: ${pc.dim("<auth0_access_token>")}\n` +
+      `  subject_token_type: ${pc.dim("urn:ietf:params:oauth:token-type:access_token")}\n` +
+      `  requested_token_type: ${pc.dim("http://auth0.com/oauth/token-type/federated-connection-access-token")}\n` +
+      `  connection: ${pc.dim("<connection_name>")}\n` +
+      `  client_id: ${pc.dim("<custom_api_client_id>")}\n` +
+      `  client_secret: ${pc.dim("<custom_api_client_secret>")}`,
+    "Token Exchange Endpoint",
+  );
+}
+
+async function createCustomAPIClient(domain) {
+  const details = await p.group(
+    {
+      apiIdentifier: () =>
+        p.text({
+          message: "Enter your backend API identifier (audience):",
+          placeholder: "https://api.example.com",
+          validate: (value) => {
+            if (!value) return "API identifier is required";
+            if (!value.startsWith("http"))
+              return "API identifier should be a URL";
+          },
+        }),
+      name: () =>
+        p.text({
+          message: "Enter a name for the Custom API Client:",
+          placeholder: "Backend API Token Vault Client",
+          defaultValue: "Backend API Token Vault Client",
+        }),
+    },
+    {
+      onCancel: () => {
+        p.cancel("Setup cancelled.");
+        process.exit(0);
+      },
+    },
+  );
+
+  const s = p.spinner();
+  s.start("Creating Custom API Client...");
+
+  try {
+    // First, check if the API (resource server) exists
+    const { stdout: apisOutput } = await runAuth0Api(
+      "get",
+      `resource-servers?identifier=${encodeURIComponent(details.apiIdentifier)}`,
+    );
+    const apis = JSON.parse(apisOutput);
+
+    let apiId;
+    if (apis && apis.length > 0) {
+      apiId = apis[0].id;
+      log(`Found existing API: ${apiId}`);
+    } else {
+      // Create the API
+      const { stdout: newApiOutput } = await runAuth0Api(
+        "post",
+        "resource-servers",
+        {
+          identifier: details.apiIdentifier,
+          name: details.name.replace("Client", "").trim(),
+          signing_alg: "RS256",
+          allow_offline_access: true,
+        },
+      );
+      const newApi = JSON.parse(newApiOutput);
+      apiId = newApi.id;
+      log(`Created new API: ${apiId}`);
+    }
+
+    // Create the Custom API Client (M2M application linked to the API)
+    const { stdout: clientOutput } = await runAuth0Command([
+      "apps",
+      "create",
+      "--name",
+      details.name,
+      "--type",
+      "m2m",
+      "--json",
+      "--no-input",
+    ]);
+    const client = JSON.parse(clientOutput);
+
+    // Enable Token Vault grant type for the Custom API Client
+    let clientGrantTypes = client.grant_types || ["client_credentials"];
+    if (!clientGrantTypes.includes(TOKEN_VAULT_GRANT_TYPE)) {
+      clientGrantTypes.push(TOKEN_VAULT_GRANT_TYPE);
+    }
+
+    await runAuth0Api("patch", `clients/${client.client_id}`, {
+      is_first_party: true,
+      oidc_conformant: true,
+      grant_types: clientGrantTypes,
+    });
+
+    s.stop("Custom API Client created");
+
+    p.note(
+      `${pc.bold("Custom API Client Details:")}\n\n` +
+        `  Name:          ${pc.cyan(client.name)}\n` +
+        `  Client ID:     ${pc.dim(client.client_id)}\n` +
+        `  Client Secret: ${pc.dim(client.client_secret)}\n` +
+        `  API Audience:  ${pc.dim(details.apiIdentifier)}\n\n` +
+        `${pc.yellow("Save these credentials securely!")}`,
+      "Custom API Client",
+    );
+
+    return { clientId: client.client_id, apiIdentifier: details.apiIdentifier };
+  } catch (error) {
+    s.stop("Failed to create Custom API Client");
+    log(`Error: ${error.message}`);
+    if (error.stdout) log(`stdout: ${error.stdout}`);
+    if (error.stderr) log(`stderr: ${error.stderr}`);
+
+    p.log.warning(
+      "Please create the Custom API Client manually in the Auth0 Dashboard.",
+    );
+    return null;
+  }
+}
+
+// ============================================================================
+// Privileged Worker Token Exchange Setup
+// ============================================================================
+
+async function setupPrivilegedWorker(appId, domain) {
+  // Configure the application for Private Key JWT authentication
+  const configurePrivateKeyJwt = await p.confirm({
+    message:
+      "Do you want to configure Private Key JWT authentication for the worker application?",
+    initialValue: true,
+  });
+
+  if (p.isCancel(configurePrivateKeyJwt)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
+
+  if (configurePrivateKeyJwt) {
+    await configurePrivateKeyJwtAuth(appId, domain);
+  }
+
+  // Show usage instructions
+  p.note(
+    `${pc.bold("Privileged Worker Token Exchange:")}\n\n` +
+      `Worker applications use signed JWT bearer tokens to exchange for external provider tokens.\n\n` +
+      `${pc.bold("JWT Requirements:")}\n` +
+      `  Header:\n` +
+      `    typ: "token-vault-req+jwt"\n` +
+      `    alg: "RS256" (or your signing algorithm)\n` +
+      `    kid: "<key_id>" (optional)\n\n` +
+      `  Payload:\n` +
+      `    sub: "<user_id>" (Auth0 user_id)\n` +
+      `    aud: "https://${domain}/"\n` +
+      `    iss: "<client_id>"\n` +
+      `    iat: <issued_at_timestamp>\n` +
+      `    exp: <expiration_timestamp>\n\n` +
+      `${pc.bold("Token Exchange Request:")}\n` +
+      `POST ${pc.cyan(`https://${domain}/oauth/token`)}\n\n` +
+      `  grant_type: ${pc.dim(TOKEN_VAULT_GRANT_TYPE)}\n` +
+      `  subject_token: ${pc.dim("<signed_jwt>")}\n` +
+      `  subject_token_type: ${pc.dim("urn:ietf:params:oauth:token-type:jwt")}\n` +
+      `  requested_token_type: ${pc.dim("http://auth0.com/oauth/token-type/federated-connection-access-token")}\n` +
+      `  connection: ${pc.dim("<connection_name>")}\n` +
+      `  client_id: ${pc.dim("<worker_client_id>")}\n` +
+      `  client_assertion_type: ${pc.dim("urn:ietf:params:oauth:client-assertion-type:jwt-bearer")}\n` +
+      `  client_assertion: ${pc.dim("<client_jwt>")}`,
+    "Privileged Worker Configuration",
+  );
+}
+
+async function configurePrivateKeyJwtAuth(appId, domain) {
+  const s = p.spinner();
+  s.start("Configuring Private Key JWT authentication...");
+
+  try {
+    // Update the application to use Private Key JWT
+    await runAuth0Api("patch", `clients/${appId}`, {
+      token_endpoint_auth_method: "private_key_jwt",
+    });
+
+    s.stop("Application configured for Private Key JWT");
+
+    const settingsUrl = buildDashboardUrl(
+      domain,
+      `applications/${appId}/credentials`,
+    );
+
+    p.note(
+      `${pc.bold("Next Steps:")}\n\n` +
+        `1. Generate an RSA key pair for signing JWTs\n\n` +
+        `2. Add the public key to your application:\n` +
+        `   ${pc.cyan(settingsUrl)}\n\n` +
+        `3. Go to the ${pc.bold("Credentials")} tab\n\n` +
+        `4. Under ${pc.bold("Public Key")}, upload your public key (PEM or JWKS format)\n\n` +
+        `${pc.bold("Generate keys with OpenSSL:")}\n` +
+        `  ${pc.dim("openssl genrsa -out private.pem 2048")}\n` +
+        `  ${pc.dim("openssl rsa -in private.pem -pubout -out public.pem")}`,
+      "Configure Public Key",
+    );
+  } catch (error) {
+    s.stop("Could not configure Private Key JWT automatically");
+    log(`Error: ${error.message}`);
+
+    p.log.warning(
+      "Please configure Private Key JWT authentication manually in the Dashboard.",
+    );
+  }
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function buildDashboardUrl(domain, path) {
+  const domainParts = domain.split(".");
+  if (domainParts.length === 4) {
+    const [tenant, region] = domainParts;
+    return `https://manage.auth0.com/dashboard/${region}/${tenant}/${path}`;
+  } else {
+    const [tenant] = domainParts;
+    return `https://manage.auth0.com/dashboard/us/${tenant}/${path}`;
+  }
+}
+
+function showCompletionSummary(app, domain, flavor) {
+  const flavorConfig = TOKEN_VAULT_FLAVORS[flavor];
+  const settingsUrl = buildDashboardUrl(
+    domain,
+    `applications/${app.id}/settings`,
+  );
+
+  const docsUrls = {
+    connected_accounts:
+      "https://auth0.com/docs/secure/call-apis-on-users-behalf/token-vault/connected-accounts-for-token-vault",
+    refresh_token_exchange:
+      "https://auth0.com/docs/secure/call-apis-on-users-behalf/token-vault/refresh-token-exchange-with-token-vault",
+    access_token_exchange:
+      "https://auth0.com/docs/secure/call-apis-on-users-behalf/token-vault/access-token-exchange-with-token-vault",
+    privileged_worker:
+      "https://auth0.com/docs/secure/call-apis-on-users-behalf/token-vault/privileged-worker-token-exchange-with-token-vault",
+  };
+
+  p.note(
+    `${pc.bold("Application Details:")}\n` +
+      `  Name:      ${pc.cyan(app.name)}\n` +
+      `  Client ID: ${pc.dim(app.id)}\n\n` +
+      `${pc.bold("Configuration:")}\n` +
+      `  Type: ${pc.cyan(flavorConfig.label)}\n\n` +
+      `${pc.bold("Settings:")}\n` +
+      `  ${pc.cyan(settingsUrl)}\n\n` +
+      `${pc.bold("Documentation:")}\n` +
+      `  ${pc.cyan(docsUrls[flavor])}`,
+    "Setup Complete",
+  );
+}
+
+// ============================================================================
+// Entry Point
+// ============================================================================
 
 main().catch((error) => {
   p.log.error(error.message);
