@@ -23,18 +23,23 @@ Token Vault is an Auth0 feature that securely stores access and refresh tokens f
 ## Prerequisites
 
 ### 1. Node.js
+
 - **Node.js** 18 or higher
 
 ### 2. Auth0 CLI
+
 Install and configure the Auth0 CLI:
+
 ```bash
 brew tap auth0/auth0-cli && brew install auth0
 ```
 
 ### 3. Auth0 Tenant
+
 - An **Auth0 tenant** with admin access
 
 ### 4. Social or Enterprise Connection
+
 You must configure at least one social or enterprise connection before running this script.
 
 **To create a connection:**
@@ -49,32 +54,27 @@ You must configure at least one social or enterprise connection before running t
    - **Authentication and Connected Accounts for Token Vault** - If this connection will be used for both user login and account linking
 
 **Supported providers:**
+
 - Google, GitHub, LinkedIn, Microsoft, Facebook, Twitter
 - Dropbox, Box, Salesforce, Fitbit, Slack, Spotify, Stripe
 - Custom OAuth2 or OIDC connections
 
 > **Note:** The connection must support Token Vault. Most social and enterprise OAuth2/OIDC connections are compatible.
 
-## Installation
-
-```bash
-npm install
-```
-
 ## Usage
 
 Run the interactive setup:
 
 ```bash
-npm start
+npx configure-auth0-token-vault
 ```
 
 Or with debug logging:
 
 ```bash
-DEBUG=true npm start
+DEBUG=true npx configure-auth0-token-vault
 # or
-npm start -- --debug
+npx configure-auth0-token-vault -- --debug
 ```
 
 ## Token Vault Flavors
@@ -86,6 +86,7 @@ The script supports four Token Vault configurations:
 **Use case:** Allow users to link and manage multiple external accounts through your application UI.
 
 **What it configures:**
+
 - My Account API activation
 - Client grants for Connected Accounts scopes
 - Multi-Resource Refresh Token (MRRT) policies
@@ -98,12 +99,14 @@ The script supports four Token Vault configurations:
 **Use case:** Backend services that need to retrieve external provider tokens using Auth0 refresh tokens, without active user sessions.
 
 **What it configures:**
+
 - Everything from Connected Accounts
 - Usage instructions for token exchange endpoint
 
 **Example:** A scheduled job that posts to users' social media accounts on their behalf.
 
 **Token Exchange:**
+
 ```bash
 POST https://{your-domain}/oauth/token
 Content-Type: application/json
@@ -124,6 +127,7 @@ Content-Type: application/json
 **Use case:** Backend APIs that exchange Auth0 access tokens for external provider tokens when handling user requests.
 
 **What it configures:**
+
 - Everything from Connected Accounts
 - Optional Custom API Client creation
 - Usage instructions for access token exchange
@@ -131,6 +135,7 @@ Content-Type: application/json
 **Example:** An API endpoint that reads a user's Google Calendar events when they make a request.
 
 **Token Exchange:**
+
 ```bash
 POST https://{your-domain}/oauth/token
 Content-Type: application/json
@@ -151,6 +156,7 @@ Content-Type: application/json
 **Use case:** Machine-to-machine applications that need to retrieve external provider tokens for specific users without active sessions.
 
 **What it configures:**
+
 - Everything from Connected Accounts
 - Private Key JWT authentication setup
 - Usage instructions for JWT bearer token exchange
@@ -158,6 +164,7 @@ Content-Type: application/json
 **Example:** A background worker that syncs data from users' Dropbox accounts to your system.
 
 **Token Exchange:**
+
 ```bash
 POST https://{your-domain}/oauth/token
 Content-Type: application/json
@@ -179,6 +186,7 @@ Content-Type: application/json
 The script automatically configures:
 
 ### Application Settings
+
 - ✅ Token Vault grant type (`urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token`)
 - ✅ First-party application status
 - ✅ OIDC conformance
@@ -186,21 +194,25 @@ The script automatically configures:
 - ✅ Required grant types (authorization_code, refresh_token)
 
 ### Connections
+
 - ✅ Connected Accounts activation
 - ✅ Application enablement
 
 ### My Account API
+
 - ✅ API creation/activation
 - ✅ Connected Accounts scopes
 - ✅ Access policy configuration (`require_client_grant`)
 
 ### Client Grants
+
 - ✅ User-type client grant with Connected Accounts scopes:
   - `create:me:connected_accounts`
   - `read:me:connected_accounts`
   - `delete:me:connected_accounts`
 
 ### Multi-Resource Refresh Token (MRRT)
+
 - ✅ MRRT policies for My Account API
 
 ## Supported Connections

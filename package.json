@@ -1,10 +1,10 @@
 {
-  "name": "create-token-vault-connected-accounts",
+  "name": "configure-auth0-token-vault",
   "version": "1.0.0",
   "description": "CLI tool to setup Auth0 Token Vault Connected Accounts prerequisites",
   "type": "module",
   "bin": {
-    "create-token-vault-connected-accounts": "./src/index.js"
+    "configure-auth0-token-vault": "./src/index.js"
   },
   "scripts": {
     "start": "node src/index.js"
