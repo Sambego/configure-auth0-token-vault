@@ -1,0 +1,27 @@
+{
+  "name": "create-token-vault-connected-accounts",
+  "version": "1.0.0",
+  "description": "CLI tool to setup Auth0 Token Vault Connected Accounts prerequisites",
+  "type": "module",
+  "bin": {
+    "create-token-vault-connected-accounts": "./src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "keywords": [
+    "auth0",
+    "token-vault",
+    "connected-accounts",
+    "cli"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.9.0",
+    "execa": "^9.5.0",
+    "picocolors": "^1.1.0"
+  }
+}
