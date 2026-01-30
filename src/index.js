@@ -356,10 +356,16 @@ async function createNewApplication() {
         p.select({
           message: "Select application type:",
           options: [
-            { value: "regular", label: "Regular Web Application" },
-            { value: "native", label: "Native" },
-            { value: "spa", label: "Single Page Application" },
-            { value: "m2m", label: "Machine to Machine" },
+            {
+              value: "regular",
+              label: "Regular Web Application",
+              hint: "Web apps with a secure backend",
+            },
+            {
+              value: "m2m",
+              label: "Machine to Machine",
+              hint: "Backend services and workers",
+            },
           ],
         }),
     },

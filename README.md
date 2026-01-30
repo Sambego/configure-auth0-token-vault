@@ -77,6 +77,15 @@ DEBUG=true npx configure-auth0-token-vault
 npx configure-auth0-token-vault -- --debug
 ```
 
+### Supported Application Types
+
+Token Vault requires **confidential clients** that can securely store client secrets. This script supports:
+
+- ✅ **Regular Web Applications** - Web apps with a secure backend server
+- ✅ **Machine to Machine** - Backend services, APIs, and worker applications
+
+❌ **Not supported:** Single Page Applications (SPAs) and Native apps are public clients and cannot use Token Vault directly. If you need Token Vault functionality in an SPA or mobile app, you must proxy requests through a backend API.
+
 ## Token Vault Flavors
 
 The script supports four Token Vault configurations:
@@ -264,10 +273,10 @@ DEBUG=true npm start
 
 ## Security Considerations
 
+- **Confidential clients only:** Token Vault requires confidential clients (Regular Web Applications or Machine-to-Machine). Public clients like SPAs or Native apps cannot use Token Vault directly without a backend proxy.
 - **Never commit credentials:** The script displays client secrets - store them securely
 - **Refresh token rotation:** The script does NOT enable refresh token rotation (as Token Vault doesn't support it)
 - **MFA policy:** Token Vault requires MFA policy to NOT be "Always"
-- **Confidential clients:** Token Vault only works with confidential clients (not public/SPA without backend)
 
 ## Resources
 
