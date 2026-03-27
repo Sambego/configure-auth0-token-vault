@@ -144,21 +144,21 @@ const TOKEN_VAULT_FLAVORS = {
   },
   refresh_token_exchange: {
     label: "Refresh Token Exchange",
-    hint: "Exchange Auth0 refresh tokens for external tokens",
+    hint: "Connected Accounts + Exchange Auth0 refresh tokens for external tokens",
     description:
-      "Backend services exchange Auth0 refresh tokens to retrieve external provider tokens without user interaction.",
+      "Connected Accounts + Backend services exchange Auth0 refresh tokens to retrieve external provider tokens without user interaction.",
   },
   access_token_exchange: {
     label: "Access Token Exchange",
-    hint: "Exchange Auth0 access tokens for external tokens",
+    hint: "Connected Accounts + Exchange Auth0 access tokens for external tokens",
     description:
-      "Backend APIs exchange Auth0 access tokens to retrieve external provider tokens on behalf of users.",
+      "Connected Accounts + Backend APIs exchange Auth0 access tokens to retrieve external provider tokens on behalf of users.",
   },
   privileged_worker: {
     label: "Privileged Worker Token Exchange",
-    hint: "M2M apps exchange signed JWTs for external tokens",
+    hint: "Connected Accounts + M2M apps exchange signed JWTs for external tokens",
     description:
-      "Machine-to-machine applications use signed JWT bearer tokens to retrieve external provider tokens without active user sessions.",
+      "Connected Accounts + Machine-to-machine applications use signed JWT bearer tokens to retrieve external provider tokens without active user sessions.",
   },
 };
 
@@ -314,7 +314,10 @@ async function checkAuth0Login() {
 async function runAuth0Login() {
   p.log.info("Opening browser for Auth0 login...");
   try {
-    await runAuth0Command(["login"], { stdio: "inherit" });
+    // auth0 CLI default login does not include this scope. We need it for the client grant creation step, so we request it upfront.
+    await runAuth0Command(["login", "--scopes", "create:client_grants"], {
+      stdio: "inherit",
+    });
     p.log.success("Login successful!");
   } catch (error) {
     p.log.error("Login failed");
@@ -789,9 +792,9 @@ async function createClientGrant(appId, domain) {
       p.note(
         `Create a client grant in the Auth0 Dashboard:\n\n` +
           `1. Go to Applications -> APIs -> My Account\n` +
-          `2. Click the "Machine to Machine Applications" tab\n` +
-          `3. Find your application and authorize it\n` +
-          `4. Select the Connected Accounts scopes:\n` +
+          `2. Click the "Application Access" tab\n` +
+          `3. Find your application and click "Edit"\n` +
+          `4. Select the User Access tab and authorize below scopes:\n` +
           `   - create:me:connected_accounts\n` +
           `   - read:me:connected_accounts\n` +
           `   - delete:me:connected_accounts`,
