@@ -380,6 +380,35 @@ async function createNewApplication() {
     },
   );
 
+  let callbackUrls = [];
+  let logoutUrls = [];
+
+  if (details.type === "regular") {
+    const urlDetails = await p.group(
+      {
+        callbackUrls: () =>
+          p.text({
+            message: "Enter callback URLs (comma-separated, optional):",
+            placeholder: "http://localhost:3000/callback",
+          }),
+        logoutUrls: () =>
+          p.text({
+            message: "Enter logout URLs (comma-separated, optional):",
+            placeholder: "http://localhost:3000",
+          }),
+      },
+      {
+        onCancel: () => {
+          p.cancel("Setup cancelled.");
+          process.exit(0);
+        },
+      },
+    );
+
+    callbackUrls = parseUrlList(urlDetails.callbackUrls);
+    logoutUrls = parseUrlList(urlDetails.logoutUrls);
+  }
+
   const s = p.spinner();
   s.start("Creating application...");
 
@@ -398,11 +427,21 @@ async function createNewApplication() {
       "--no-input",
     ];
 
+    if (details.type === "regular") {
+      if (callbackUrls.length) {
+        createArgs.push("--callbacks", callbackUrls.join(","));
+      }
+      if (logoutUrls.length) {
+        createArgs.push("--logout-urls", logoutUrls.join(","));
+      }
+    }
+
     log(`Full command: auth0 ${createArgs.join(" ")}`);
     const { stdout } = await runAuth0Command(createArgs);
 
     log(`Response: ${stdout}`);
     const app = JSON.parse(stdout);
+
     s.stop(`Application created: ${pc.cyan(app.name)}`);
     return { id: app.client_id, name: app.name };
   } catch (error) {
@@ -416,6 +455,17 @@ async function createNewApplication() {
     }
     throw error;
   }
+}
+
+function parseUrlList(rawValue) {
+  if (!rawValue) {
+    return [];
+  }
+
+  return rawValue
+    .split(",")
+    .map((url) => url.trim())
+    .filter(Boolean);
 }
 
 async function selectExistingApplication() {
