@@ -4,7 +4,86 @@ import * as p from "@clack/prompts";
 import { execa } from "execa";
 import pc from "picocolors";
 
+// ============================================================================
+// CLI Flag Parsing
+// ============================================================================
+
+function getFlag(name) {
+  const prefix = `--${name}=`;
+  const arg = process.argv.find((a) => a.startsWith(prefix));
+  if (arg) return arg.slice(prefix.length);
+  return undefined;
+}
+
+function getBoolFlag(name) {
+  if (process.argv.includes(`--${name}`)) return true;
+  if (process.argv.includes(`--no-${name}`)) return false;
+  return undefined;
+}
+
 const DEBUG = process.env.DEBUG === "true" || process.argv.includes("--debug");
+const FLAGS = {
+  login: getBoolFlag("login"),
+  reauth: getBoolFlag("reauth"),
+  appSetup: getFlag("app-setup"), // "new" or "existing"
+  appName: getFlag("app-name"),
+  appType: getFlag("app-type"), // "regular" or "m2m"
+  callbackUrls: getFlag("callback-urls"),
+  logoutUrls: getFlag("logout-urls"),
+  appId: getFlag("app-id"), // client ID for existing app
+  flavor: getFlag("flavor"), // "connected_accounts", "refresh_token_exchange", "access_token_exchange", "privileged_worker"
+  connections: getFlag("connections"), // comma-separated connection names or "none"
+  createApiClient: getBoolFlag("create-api-client"),
+  apiIdentifier: getFlag("api-identifier"),
+  apiClientName: getFlag("api-client-name"),
+  configurePrivateKeyJwt: getBoolFlag("configure-private-key-jwt"),
+};
+
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+  console.log(`
+Auth0 Token Vault Setup
+
+Usage: configure-auth0-token-vault [options]
+
+Options:
+  --debug                         Enable debug logging
+  --login / --no-login            Auto-answer the login prompt
+  --reauth / --no-reauth          Auto-answer the reauthentication prompt
+  --app-setup=<new|existing>      Skip app setup question ("new" or "existing")
+  --app-name=<name>               Application name (default: "Token Vault App")
+  --app-type=<regular|m2m>        Application type (default: "regular")
+  --callback-urls=<urls>          Comma-separated callback URLs
+  --logout-urls=<urls>            Comma-separated logout URLs
+  --app-id=<client_id>            Use an existing application by client ID
+  --flavor=<flavor>               Token Vault flavor:
+                                    connected_accounts, refresh_token_exchange,
+                                    access_token_exchange, privileged_worker
+  --connections=<names|none>      Comma-separated connection names, or "none"
+  --create-api-client /           Create a Custom API Client
+    --no-create-api-client
+  --api-identifier=<url>          Backend API identifier (audience)
+  --api-client-name=<name>        Custom API Client name
+  --configure-private-key-jwt /   Configure Private Key JWT authentication
+    --no-configure-private-key-jwt
+  -h, --help                      Show this help message
+
+Examples:
+  # Fully non-interactive: create a new regular web app
+  configure-auth0-token-vault \\
+    --login --app-setup=new --app-name="My App" --app-type=regular \\
+    --callback-urls=http://localhost:3000/callback \\
+    --logout-urls=http://localhost:3000 \\
+    --connections=google-oauth2 \\
+    --flavor=connected_accounts
+
+  # Use an existing app with access token exchange
+  configure-auth0-token-vault \\
+    --app-id=abc123 --flavor=access_token_exchange \\
+    --connections=none --create-api-client \\
+    --api-identifier=https://api.example.com
+`);
+  process.exit(0);
+}
 
 function log(message) {
   if (DEBUG) {
@@ -25,10 +104,12 @@ async function checkScopesChanged(text) {
     p.log.error(
       "The Auth0 CLI requires additional scopes to complete this operation.",
     );
-    const shouldReauth = await p.confirm({
-      message: "Would you like to reauthenticate with the required scopes?",
-      initialValue: true,
-    });
+    const shouldReauth =
+      FLAGS.reauth ??
+      (await p.confirm({
+        message: "Would you like to reauthenticate with the required scopes?",
+        initialValue: true,
+      }));
 
     if (p.isCancel(shouldReauth) || !shouldReauth) {
       p.cancel("Please run 'auth0 login' manually with the required scopes.");
@@ -188,10 +269,12 @@ async function main() {
   // Check if logged in
   const loggedIn = await checkAuth0Login();
   if (!loggedIn) {
-    const shouldLogin = await p.confirm({
-      message: "You need to log in to Auth0 CLI. Log in now?",
-      initialValue: true,
-    });
+    const shouldLogin =
+      FLAGS.login ??
+      (await p.confirm({
+        message: "You need to log in to Auth0 CLI. Log in now?",
+        initialValue: true,
+      }));
 
     if (p.isCancel(shouldLogin) || !shouldLogin) {
       p.cancel("Login required to continue.");
@@ -206,13 +289,16 @@ async function main() {
   p.log.success(`Connected to tenant: ${pc.cyan(tenantInfo.domain)}`);
 
   // Ask about application setup
-  const appChoice = await p.select({
-    message: "How would you like to configure the application?",
-    options: [
-      { value: "new", label: "Create a new application" },
-      { value: "existing", label: "Use an existing application" },
-    ],
-  });
+  const appChoice =
+    FLAGS.appSetup ??
+    (FLAGS.appId ? "existing" : undefined) ??
+    (await p.select({
+      message: "How would you like to configure the application?",
+      options: [
+        { value: "new", label: "Create a new application" },
+        { value: "existing", label: "Use an existing application" },
+      ],
+    }));
 
   if (p.isCancel(appChoice)) {
     p.cancel("Setup cancelled.");
@@ -241,14 +327,16 @@ async function main() {
   await configureConnections(app.id);
 
   // Ask which Token Vault flavor to configure
-  const flavor = await p.select({
-    message: "Which Token Vault configuration do you need?",
-    options: Object.entries(TOKEN_VAULT_FLAVORS).map(([value, config]) => ({
-      value,
-      label: config.label,
-      hint: config.hint,
-    })),
-  });
+  const flavor =
+    FLAGS.flavor ??
+    (await p.select({
+      message: "Which Token Vault configuration do you need?",
+      options: Object.entries(TOKEN_VAULT_FLAVORS).map(([value, config]) => ({
+        value,
+        label: config.label,
+        hint: config.hint,
+      })),
+    }));
 
   if (p.isCancel(flavor)) {
     p.cancel("Setup cancelled.");
@@ -347,54 +435,37 @@ async function getTenantInfo() {
 // ============================================================================
 
 async function createNewApplication() {
-  const details = await p.group(
-    {
-      name: () =>
-        p.text({
-          message: "Enter application name:",
-          placeholder: "Token Vault App",
-          defaultValue: "Token Vault App",
-        }),
-      type: () =>
-        p.select({
-          message: "Select application type:",
-          options: [
-            {
-              value: "regular",
-              label: "Regular Web Application",
-              hint: "Web apps with a secure backend",
-            },
-            {
-              value: "m2m",
-              label: "Machine to Machine",
-              hint: "Backend services and workers",
-            },
-          ],
-        }),
-    },
-    {
-      onCancel: () => {
-        p.cancel("Setup cancelled.");
-        process.exit(0);
-      },
-    },
-  );
+  let details;
 
-  let callbackUrls = [];
-  let logoutUrls = [];
-
-  if (details.type === "regular") {
-    const urlDetails = await p.group(
+  if (FLAGS.appName != null || FLAGS.appType != null) {
+    details = {
+      name: FLAGS.appName ?? "Token Vault App",
+      type: FLAGS.appType ?? "regular",
+    };
+  } else {
+    details = await p.group(
       {
-        callbackUrls: () =>
+        name: () =>
           p.text({
-            message: "Enter callback URLs (comma-separated, optional):",
-            placeholder: "http://localhost:3000/callback",
+            message: "Enter application name:",
+            placeholder: "Token Vault App",
+            defaultValue: "Token Vault App",
           }),
-        logoutUrls: () =>
-          p.text({
-            message: "Enter logout URLs (comma-separated, optional):",
-            placeholder: "http://localhost:3000",
+        type: () =>
+          p.select({
+            message: "Select application type:",
+            options: [
+              {
+                value: "regular",
+                label: "Regular Web Application",
+                hint: "Web apps with a secure backend",
+              },
+              {
+                value: "m2m",
+                label: "Machine to Machine",
+                hint: "Backend services and workers",
+              },
+            ],
           }),
       },
       {
@@ -404,9 +475,40 @@ async function createNewApplication() {
         },
       },
     );
+  }
 
-    callbackUrls = parseUrlList(urlDetails.callbackUrls);
-    logoutUrls = parseUrlList(urlDetails.logoutUrls);
+  let callbackUrls = [];
+  let logoutUrls = [];
+
+  if (details.type === "regular") {
+    if (FLAGS.callbackUrls != null || FLAGS.logoutUrls != null) {
+      callbackUrls = parseUrlList(FLAGS.callbackUrls);
+      logoutUrls = parseUrlList(FLAGS.logoutUrls);
+    } else {
+      const urlDetails = await p.group(
+        {
+          callbackUrls: () =>
+            p.text({
+              message: "Enter callback URLs (comma-separated, optional):",
+              placeholder: "http://localhost:3000/callback",
+            }),
+          logoutUrls: () =>
+            p.text({
+              message: "Enter logout URLs (comma-separated, optional):",
+              placeholder: "http://localhost:3000",
+            }),
+        },
+        {
+          onCancel: () => {
+            p.cancel("Setup cancelled.");
+            process.exit(0);
+          },
+        },
+      );
+
+      callbackUrls = parseUrlList(urlDetails.callbackUrls);
+      logoutUrls = parseUrlList(urlDetails.logoutUrls);
+    }
   }
 
   const s = p.spinner();
@@ -469,6 +571,26 @@ function parseUrlList(rawValue) {
 }
 
 async function selectExistingApplication() {
+  if (FLAGS.appId) {
+    const s = p.spinner();
+    s.start("Fetching application details...");
+    try {
+      const { stdout } = await runAuth0Command([
+        "apps",
+        "show",
+        FLAGS.appId,
+        "--json",
+        "--no-input",
+      ]);
+      const app = JSON.parse(stdout);
+      s.stop("Application loaded");
+      return { id: app.client_id, name: app.name };
+    } catch (error) {
+      s.stop("Failed to fetch application");
+      throw error;
+    }
+  }
+
   const s = p.spinner();
   s.start("Fetching applications...");
 
@@ -604,24 +726,43 @@ async function configureConnections(appId) {
       return;
     }
 
-    const selectedConnections = await p.multiselect({
-      message: "Select connections to enable for Token Vault:",
-      options: eligibleConnections.map((conn) => ({
-        value: conn,
-        label: conn.name,
-        hint: conn.strategy,
-      })),
-      required: false,
-    });
+    let selectedConnections;
 
-    if (p.isCancel(selectedConnections)) {
-      p.cancel("Setup cancelled.");
-      process.exit(0);
-    }
+    if (FLAGS.connections != null) {
+      if (FLAGS.connections === "none") {
+        p.log.warning("No connections selected.");
+        return;
+      }
+      const connectionNames = FLAGS.connections.split(",").map((n) => n.trim());
+      selectedConnections = eligibleConnections.filter((conn) =>
+        connectionNames.includes(conn.name),
+      );
+      if (selectedConnections.length === 0) {
+        p.log.warning(
+          "No matching connections found for the provided names.",
+        );
+        return;
+      }
+    } else {
+      selectedConnections = await p.multiselect({
+        message: "Select connections to enable for Token Vault:",
+        options: eligibleConnections.map((conn) => ({
+          value: conn,
+          label: conn.name,
+          hint: conn.strategy,
+        })),
+        required: false,
+      });
 
-    if (!selectedConnections || selectedConnections.length === 0) {
-      p.log.warning("No connections selected.");
-      return;
+      if (p.isCancel(selectedConnections)) {
+        p.cancel("Setup cancelled.");
+        process.exit(0);
+      }
+
+      if (!selectedConnections || selectedConnections.length === 0) {
+        p.log.warning("No connections selected.");
+        return;
+      }
     }
 
     for (const conn of selectedConnections) {
@@ -946,11 +1087,13 @@ async function setupRefreshTokenExchange(appId, domain) {
 
 async function setupAccessTokenExchange(appId, domain) {
   // Ask if user wants to create a Custom API Client
-  const createCustomApiClient = await p.confirm({
-    message:
-      "Do you want to create a Custom API Client for your backend API? (Required for Access Token Exchange)",
-    initialValue: true,
-  });
+  const createCustomApiClient =
+    FLAGS.createApiClient ??
+    (await p.confirm({
+      message:
+        "Do you want to create a Custom API Client for your backend API? (Required for Access Token Exchange)",
+      initialValue: true,
+    }));
 
   if (p.isCancel(createCustomApiClient)) {
     p.cancel("Setup cancelled.");
@@ -979,32 +1122,41 @@ async function setupAccessTokenExchange(appId, domain) {
 }
 
 async function createCustomAPIClient(domain) {
-  const details = await p.group(
-    {
-      apiIdentifier: () =>
-        p.text({
-          message: "Enter your backend API identifier (audience):",
-          placeholder: "https://api.example.com",
-          validate: (value) => {
-            if (!value) return "API identifier is required";
-            if (!value.startsWith("http"))
-              return "API identifier should be a URL";
-          },
-        }),
-      name: () =>
-        p.text({
-          message: "Enter a name for the Custom API Client:",
-          placeholder: "Backend API Token Vault Client",
-          defaultValue: "Backend API Token Vault Client",
-        }),
-    },
-    {
-      onCancel: () => {
-        p.cancel("Setup cancelled.");
-        process.exit(0);
+  let details;
+
+  if (FLAGS.apiIdentifier != null) {
+    details = {
+      apiIdentifier: FLAGS.apiIdentifier,
+      name: FLAGS.apiClientName ?? "Backend API Token Vault Client",
+    };
+  } else {
+    details = await p.group(
+      {
+        apiIdentifier: () =>
+          p.text({
+            message: "Enter your backend API identifier (audience):",
+            placeholder: "https://api.example.com",
+            validate: (value) => {
+              if (!value) return "API identifier is required";
+              if (!value.startsWith("http"))
+                return "API identifier should be a URL";
+            },
+          }),
+        name: () =>
+          p.text({
+            message: "Enter a name for the Custom API Client:",
+            placeholder: "Backend API Token Vault Client",
+            defaultValue: "Backend API Token Vault Client",
+          }),
       },
-    },
-  );
+      {
+        onCancel: () => {
+          p.cancel("Setup cancelled.");
+          process.exit(0);
+        },
+      },
+    );
+  }
 
   const s = p.spinner();
   s.start("Creating Custom API Client...");
@@ -1095,11 +1247,13 @@ async function createCustomAPIClient(domain) {
 
 async function setupPrivilegedWorker(appId, domain) {
   // Configure the application for Private Key JWT authentication
-  const configurePrivateKeyJwt = await p.confirm({
-    message:
-      "Do you want to configure Private Key JWT authentication for the worker application?",
-    initialValue: true,
-  });
+  const configurePrivateKeyJwt =
+    FLAGS.configurePrivateKeyJwt ??
+    (await p.confirm({
+      message:
+        "Do you want to configure Private Key JWT authentication for the worker application?",
+      initialValue: true,
+    }));
 
   if (p.isCancel(configurePrivateKeyJwt)) {
     p.cancel("Setup cancelled.");
