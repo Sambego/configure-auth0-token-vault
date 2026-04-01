@@ -1,6 +1,6 @@
 {
   "name": "configure-auth0-token-vault",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "CLI tool to setup Auth0 Token Vault Connected Accounts prerequisites",
   "type": "module",
   "bin": {
