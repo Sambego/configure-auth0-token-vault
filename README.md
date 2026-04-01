@@ -13,7 +13,7 @@ Token Vault is an Auth0 feature that securely stores access and refresh tokens f
 
 ## Features
 
-- 🚀 Interactive setup wizard
+- 🚀 Interactive and non-interactive setup wizard
 - 🔐 Automatic configuration of applications, connections, and APIs
 - 📦 Support for multiple Token Vault patterns
 - ✅ Idempotent - safe to run multiple times
@@ -67,6 +67,17 @@ Run the interactive setup:
 
 ```bash
 npx configure-auth0-token-vault
+```
+
+Run in non-interactive mode with flags:
+
+```bash
+npx configure-auth0-token-vault -- --app-setup=new \
+    --app-name="My App" --app-type=regular \
+    --callback-urls=http://localhost:3000/callback \
+    --logout-urls=http://localhost:3000 \
+    --connections=google-oauth2 \
+    --flavor=connected_accounts
 ```
 
 Or with debug logging:
